@@ -666,6 +666,226 @@ export const projectRouter = createTRPCRouter({
 				});
 			}
 		}),
+
+	// GitHub Project Ingestion Endpoints
+	ingestFromGithub: protectedProcedure
+		.input(
+			z.object({
+				githubUrl: z.string().url(),
+				projectId: z.string().min(1),
+				customName: z.string().optional(),
+				branch: z.string().optional(),
+				accessToken: z.string().optional(), // For private repositories
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			try {
+				// Import ProjectIngestionService
+				const { ProjectIngestionService } = await import(
+					"@dokploy/server/services/project-ingestion"
+				);
+				const ingestionService = new ProjectIngestionService();
+
+				return await ingestionService.ingestFromGithub(ctx.user.id, {
+					githubUrl: input.githubUrl,
+					projectId: input.projectId,
+					organizationId: ctx.session.activeOrganizationId,
+					customName: input.customName,
+					branch: input.branch,
+					accessToken: input.accessToken,
+				});
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error ingesting GitHub project: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// List user's deployed projects
+	listDeployedProjects: protectedProcedure.query(async ({ ctx }) => {
+		try {
+			const { ProjectIngestionService } = await import(
+				"@dokploy/server/services/project-ingestion"
+			);
+			const ingestionService = new ProjectIngestionService();
+
+			return await ingestionService.listUserDeployedProjects(ctx.user.id);
+		} catch (error) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: `Error fetching deployed projects: ${error instanceof Error ? error.message : error}`,
+				cause: error,
+			});
+		}
+	}),
+
+	// Deploy an imported project
+	deployImportedProject: protectedProcedure
+		.input(
+			z.object({
+				deployedProjectId: z.string().min(1),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			try {
+				const { deployImportedProject } = await import(
+					"@dokploy/server/services/deployment"
+				);
+
+				return await deployImportedProject(
+					input.deployedProjectId,
+					ctx.user.id,
+				);
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error deploying imported project: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// Get deployment history for an imported project
+	getImportedProjectDeployments: protectedProcedure
+		.input(
+			z.object({
+				deployedProjectId: z.string().min(1),
+			}),
+		)
+		.query(async ({ ctx, input }) => {
+			try {
+				const { getImportedProjectDeployments } = await import(
+					"@dokploy/server/services/deployment"
+				);
+
+				return await getImportedProjectDeployments(
+					input.deployedProjectId,
+					ctx.user.id,
+				);
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error fetching deployment history: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// Delete an imported project
+	deleteImportedProject: protectedProcedure
+		.input(
+			z.object({
+				deployedProjectId: z.string().min(1),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			try {
+				const { ProjectIngestionService } = await import(
+					"@dokploy/server/services/project-ingestion"
+				);
+				const ingestionService = new ProjectIngestionService();
+
+				return await ingestionService.deleteDeployedProject(
+					input.deployedProjectId,
+					ctx.user.id,
+				);
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error deleting imported project: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// Validate GitHub repository
+	validateGithubRepository: protectedProcedure
+		.input(
+			z.object({
+				githubUrl: z.string().url(),
+				accessToken: z.string().optional(),
+			}),
+		)
+		.query(async ({ input }) => {
+			try {
+				const { GitHubService } = await import(
+					"@dokploy/server/services/github"
+				);
+
+				const isValid = await GitHubService.validateRepository(
+					input.githubUrl,
+					input.accessToken,
+				);
+
+				return { isValid };
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error validating GitHub repository: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// Store user AI credentials
+	storeAiCredentials: protectedProcedure
+		.input(
+			z.object({
+				provider: z.enum(["openai", "anthropic", "cohere"]),
+				apiKey: z.string().min(1),
+			}),
+		)
+		.mutation(async ({ ctx, input }) => {
+			try {
+				const { AIProxyService } = await import(
+					"@dokploy/server/services/ai-proxy"
+				);
+				const aiProxy = new AIProxyService();
+
+				await aiProxy.storeUserAICredentials(
+					ctx.user.id,
+					input.provider,
+					input.apiKey,
+				);
+
+				// Initialize quotas for new users
+				await aiProxy.initializeUserQuotas(ctx.user.id);
+
+				return { success: true };
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error storing AI credentials: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
+
+	// Get user usage statistics
+	getUserUsageStats: protectedProcedure
+		.input(
+			z.object({
+				timeframe: z.enum(["daily", "monthly", "all"]).default("monthly"),
+			}),
+		)
+		.query(async ({ ctx, input }) => {
+			try {
+				const { AIProxyService } = await import(
+					"@dokploy/server/services/ai-proxy"
+				);
+				const aiProxy = new AIProxyService();
+
+				return await aiProxy.getUserUsageStats(ctx.user.id, input.timeframe);
+			} catch (error) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: `Error fetching usage stats: ${error instanceof Error ? error.message : error}`,
+					cause: error,
+				});
+			}
+		}),
 });
 
 function buildServiceFilter(

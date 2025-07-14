@@ -24,6 +24,7 @@ import {
 import { type Compose, findComposeById, updateCompose } from "./compose";
 import { type Server, findServerById } from "./server";
 
+import { userDeployedProjects } from "@dokploy/server/db/schema";
 import { execAsyncRemote } from "@dokploy/server/utils/process/execAsync";
 import { findBackupById } from "./backup";
 import {
@@ -31,11 +32,19 @@ import {
 	findPreviewDeploymentById,
 	updatePreviewDeployment,
 } from "./preview-deployment";
-import { findScheduleById } from "./schedule";
 import { removeRollbackById } from "./rollbacks";
+import { findScheduleById } from "./schedule";
 import { findVolumeBackupById } from "./volume-backups";
 
 export type Deployment = typeof deployments.$inferSelect;
+
+export interface LocalSourceDeployment {
+	applicationId: string;
+	sourcePath: string;
+	title?: string;
+	description?: string;
+	userId: string;
+}
 
 export const findDeploymentById = async (deploymentId: string) => {
 	const deployment = await db.query.deployments.findFirst({
@@ -826,4 +835,196 @@ export const findAllDeploymentsByServerId = async (serverId: string) => {
 		orderBy: desc(deployments.createdAt),
 	});
 	return deploymentsList;
+};
+
+/**
+ * Creates a deployment for applications with local source code (imported projects)
+ * This is used when deploying projects that were ingested from GitHub
+ */
+export const createDeploymentForLocalSource = async (
+	deployment: LocalSourceDeployment,
+): Promise<Deployment> => {
+	const application = await findApplicationById(deployment.applicationId);
+
+	try {
+		await removeLastTenDeployments(
+			deployment.applicationId,
+			"application",
+			application.serverId,
+		);
+
+		const { LOGS_PATH } = paths(!!application.serverId);
+		const formattedDateTime = format(new Date(), "yyyy-MM-dd:HH:mm:ss");
+		const fileName = `${application.appName}-${formattedDateTime}.log`;
+		const logFilePath = path.join(LOGS_PATH, application.appName, fileName);
+
+		// Initialize logs
+		if (application.serverId) {
+			const server = await findServerById(application.serverId);
+			const command = `
+				mkdir -p ${LOGS_PATH}/${application.appName};
+				echo "Initializing local source deployment" >> ${logFilePath};
+				echo "Source path: ${deployment.sourcePath}" >> ${logFilePath};
+			`;
+			await execAsyncRemote(server.serverId, command);
+		} else {
+			await fsPromises.mkdir(path.join(LOGS_PATH, application.appName), {
+				recursive: true,
+			});
+			await fsPromises.writeFile(
+				logFilePath,
+				`Initializing local source deployment\nSource path: ${deployment.sourcePath}\n`,
+			);
+		}
+
+		// Create deployment record with local source info in description
+		const deploymentCreate = await db
+			.insert(deployments)
+			.values({
+				applicationId: deployment.applicationId,
+				title: deployment.title || "Local Source Deployment",
+				status: "running",
+				logPath: logFilePath,
+				description: `${deployment.description || "Deployment from local source code"} | Source: ${deployment.sourcePath} | User: ${deployment.userId}`,
+				startedAt: new Date().toISOString(),
+			})
+			.returning();
+
+		if (deploymentCreate.length === 0 || !deploymentCreate[0]) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error creating the local source deployment",
+			});
+		}
+
+		return deploymentCreate[0];
+	} catch (error) {
+		// Create failed deployment record
+		await db
+			.insert(deployments)
+			.values({
+				applicationId: deployment.applicationId,
+				title: deployment.title || "Local Source Deployment",
+				status: "error",
+				logPath: "",
+				description:
+					deployment.description || "Failed deployment from local source",
+				errorMessage: `Local source deployment failed: ${error instanceof Error ? error.message : error}`,
+				startedAt: new Date().toISOString(),
+				finishedAt: new Date().toISOString(),
+			})
+			.returning();
+
+		await updateApplicationStatus(application.applicationId, "error");
+		console.error("Local source deployment error:", error);
+
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Error creating the local source deployment",
+		});
+	}
+};
+
+/**
+ * Triggers deployment for a GitHub imported project
+ */
+export const deployImportedProject = async (
+	deployedProjectId: string,
+	userId: string,
+): Promise<Deployment> => {
+	// Get the deployed project record
+	const deployedProject = await db.query.userDeployedProjects.findFirst({
+		where: eq(userDeployedProjects.id, deployedProjectId),
+	});
+
+	if (!deployedProject) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Deployed project not found",
+		});
+	}
+
+	if (deployedProject.userId !== userId) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: "Not authorized to deploy this project",
+		});
+	}
+
+	// Check if source code exists
+	const sourcePath = `/dokploy/builds/sources/${deployedProject.dokployApplicationId}`;
+	if (!existsSync(sourcePath)) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Source code not found. Please re-import the project.",
+		});
+	}
+
+	// Update deployment status to building
+	await db
+		.update(userDeployedProjects)
+		.set({
+			deploymentStatus: "building",
+			updatedAt: new Date(),
+		})
+		.where(eq(userDeployedProjects.id, deployedProjectId));
+
+	// Create deployment
+	const deployment = await createDeploymentForLocalSource({
+		applicationId: deployedProject.dokployApplicationId,
+		sourcePath,
+		title: `Deploy ${deployedProject.githubUrl}`,
+		description: `Deployment of imported project from ${deployedProject.githubUrl}`,
+		userId,
+	});
+
+	return deployment;
+};
+
+/**
+ * Updates deployment status for imported projects
+ */
+export const updateImportedProjectDeploymentStatus = async (
+	deployedProjectId: string,
+	status: "created" | "building" | "running" | "failed" | "stopped",
+): Promise<void> => {
+	await db
+		.update(userDeployedProjects)
+		.set({
+			deploymentStatus: status,
+			updatedAt: new Date(),
+			...(status === "running" && { lastAccessedAt: new Date() }),
+		})
+		.where(eq(userDeployedProjects.id, deployedProjectId));
+};
+
+/**
+ * Gets deployment history for an imported project
+ */
+export const getImportedProjectDeployments = async (
+	deployedProjectId: string,
+	userId: string,
+) => {
+	const deployedProject = await db.query.userDeployedProjects.findFirst({
+		where: eq(userDeployedProjects.id, deployedProjectId),
+	});
+
+	if (!deployedProject) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Deployed project not found",
+		});
+	}
+
+	if (deployedProject.userId !== userId) {
+		throw new TRPCError({
+			code: "FORBIDDEN",
+			message: "Not authorized to view this project",
+		});
+	}
+
+	return await db.query.deployments.findMany({
+		where: eq(deployments.applicationId, deployedProject.dokployApplicationId),
+		orderBy: desc(deployments.createdAt),
+	});
 };
