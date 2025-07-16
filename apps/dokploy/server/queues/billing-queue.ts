@@ -42,7 +42,10 @@ const PRICING_CONFIG = {
 	anthropic: {
 		"claude-3-opus-20240229": { input: 0.015, output: 0.075 } as ModelPricing,
 		"claude-3-sonnet-20240229": { input: 0.003, output: 0.015 } as ModelPricing,
-		"claude-3-haiku-20240307": { input: 0.00025, output: 0.00125 } as ModelPricing,
+		"claude-3-haiku-20240307": {
+			input: 0.00025,
+			output: 0.00125,
+		} as ModelPricing,
 	},
 	cohere: {
 		command: { input: 0.001, output: 0.002 } as ModelPricing,
@@ -220,15 +223,16 @@ async function processTokenUsage(
 		return;
 	}
 
-	const providerConfig = PRICING_CONFIG[provider as keyof typeof PRICING_CONFIG];
-	if (typeof providerConfig !== 'object' || !(model in providerConfig)) {
-		console.warn(
-			`Model ${model} not found in pricing config for ${provider}`,
-		);
+	const providerConfig =
+		PRICING_CONFIG[provider as keyof typeof PRICING_CONFIG];
+	if (typeof providerConfig !== "object" || !(model in providerConfig)) {
+		console.warn(`Model ${model} not found in pricing config for ${provider}`);
 		return;
 	}
 
-	const pricing = providerConfig[model as keyof typeof providerConfig] as ModelPricing;
+	const pricing = providerConfig[
+		model as keyof typeof providerConfig
+	] as ModelPricing;
 	const { prompt_tokens = 0, completion_tokens = 0 } = usageData;
 
 	// Calculate costs (pricing is per 1K tokens)

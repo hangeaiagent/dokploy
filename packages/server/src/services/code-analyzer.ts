@@ -356,9 +356,7 @@ export class CodeAnalyzerService {
 		};
 	}
 
-	private async detectPythonFramework(
-		repoPath: string,
-	): Promise<{
+	private async detectPythonFramework(repoPath: string): Promise<{
 		name: string;
 		startCommand: string;
 		port: number;

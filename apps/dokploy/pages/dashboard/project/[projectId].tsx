@@ -18,7 +18,10 @@ import { StatusTooltip } from "@/components/shared/status-tooltip";
 import { Button } from "@/components/ui/button";
 
 import { AddAiAssistant } from "@/components/dashboard/project/add-ai-assistant";
+import { DeployedProjectsManager } from "@/components/dashboard/project/deployed-projects-manager";
 import { DuplicateProject } from "@/components/dashboard/project/duplicate-project";
+import { GitHubBrowser } from "@/components/dashboard/project/github-browser";
+import { GitHubImport } from "@/components/dashboard/project/github-import";
 import {
 	Card,
 	CardContent,
@@ -658,6 +661,13 @@ const Project = (
 												projectId={projectId}
 												projectName={data?.name}
 											/>
+											<DropdownMenuSeparator />
+											<GitHubImport
+												projectId={projectId}
+												projectName={data?.name}
+											/>
+											<GitHubBrowser projectId={projectId} />
+											<DeployedProjectsManager projectId={projectId} />
 										</DropdownMenuContent>
 									</DropdownMenu>
 								</div>
