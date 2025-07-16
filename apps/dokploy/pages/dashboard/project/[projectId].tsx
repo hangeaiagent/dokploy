@@ -629,9 +629,20 @@ const Project = (
 									<ProjectEnvironment projectId={projectId}>
 										<Button variant="outline">Project Environment</Button>
 									</ProjectEnvironment>
-									<DropdownMenu>
+									<DropdownMenu onOpenChange={(open) => {
+										console.log('0716 - Create Service 下拉菜单状态变化', {
+											isOpen: open,
+											projectId,
+											timestamp: new Date().toISOString()
+										});
+									}}>
 										<DropdownMenuTrigger asChild>
-											<Button>
+											<Button onClick={() => {
+												console.log('0716 - Create Service 按钮被点击', {
+													projectId,
+													timestamp: new Date().toISOString()
+												});
+											}}>
 												<PlusIcon className="h-4 w-4" />
 												Create Service
 											</Button>
@@ -639,6 +650,12 @@ const Project = (
 										<DropdownMenuContent
 											className="w-[200px] space-y-2"
 											align="end"
+											onCloseAutoFocus={() => {
+												console.log('0716 - Create Service 下拉菜单关闭', {
+													projectId,
+													timestamp: new Date().toISOString()
+												});
+											}}
 										>
 											<DropdownMenuLabel className="text-sm font-normal">
 												Actions
@@ -662,12 +679,43 @@ const Project = (
 												projectName={data?.name}
 											/>
 											<DropdownMenuSeparator />
+											{/* GitHub功能日志 - 0716 */}
+											{(() => {
+												console.log('0716 - GitHub功能渲染开始', {
+													projectId,
+													projectName: data?.name,
+													timestamp: new Date().toISOString()
+												});
+												return null;
+											})()}
 											<GitHubImport
 												projectId={projectId}
 												projectName={data?.name}
 											/>
+											{(() => {
+												console.log('0716 - GitHubImport组件已渲染', {
+													projectId,
+													projectName: data?.name,
+													timestamp: new Date().toISOString()
+												});
+												return null;
+											})()}
 											<GitHubBrowser projectId={projectId} />
+											{(() => {
+												console.log('0716 - GitHubBrowser组件已渲染', {
+													projectId,
+													timestamp: new Date().toISOString()
+												});
+												return null;
+											})()}
 											<DeployedProjectsManager projectId={projectId} />
+											{(() => {
+												console.log('0716 - GitHub功能渲染完成', {
+													projectId,
+													timestamp: new Date().toISOString()
+												});
+												return null;
+											})()}
 										</DropdownMenuContent>
 									</DropdownMenu>
 								</div>
